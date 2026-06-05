@@ -8,9 +8,9 @@
     "build:win": "electron-builder --win"
   },
   "dependencies": {
-    "electron": "^latest"
+    "electron": "latest"
   },
   "devDependencies": {
-    "electron-builder": "^latest"
+    "electron-builder": "latest"
   }
 }
