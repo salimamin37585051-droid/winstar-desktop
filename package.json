@@ -4,7 +4,6 @@
   "description": "Winstar Desktop Application",
   "main": "index.js",
   "scripts": {
-    "install": "npm install",
     "build:win": "electron-builder --win"
   },
   "dependencies": {
