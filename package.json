@@ -7,9 +7,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux"
+    "build:win": "electron-builder --win"
   },
   "devDependencies": {
     "electron": "^28.0.0",
@@ -18,46 +16,20 @@
   "build": {
     "appId": "co.ke.winstar.app",
     "productName": "Winstar",
-    "copyright": "Copyright © 2026 Winstar",
     "directories": {
       "output": "dist"
     },
     "files": [
       "main.js",
-      "src/**/*",
-      "build/**/*"
+      "src/**/*"
     ],
     "win": {
       "target": [
         {
-          "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
           "target": "portable",
           "arch": ["x64"]
         }
-      ],
-      "icon": "build/icon.ico",
-      "publisherName": "Winstar"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Winstar",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico"
-    },
-    "mac": {
-      "target": "dmg",
-      "icon": "build/icon.icns"
-    },
-    "linux": {
-      "target": "AppImage",
-      "icon": "build/icon.png"
+      ]
     }
   }
 }
