@@ -1,30 +1,30 @@
 const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
-const path = require('path');
 
 let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-  width: 1400,
-  height: 860,
-  minWidth: 900,
-  minHeight: 600,
-  title: 'Winstar | winstar.co.ke',
-  webPreferences: {
-    nodeIntegration: false,
-    contextIsolation: true,
-    webSecurity: false
-  },
-  backgroundColor: '#0A0908',
-  show: false,
-});
+    width: 1400,
+    height: 860,
+    minWidth: 900,
+    minHeight: 600,
+    title: 'Winstar | winstar.co.ke',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+    backgroundColor: '#0A0908',
+    show: false,
+  });
 
-mainWindow.loadFile('index.html');
+  // Load the live Winstar app
+  mainWindow.loadURL('https://winstar-solution-wh65.onrender.com');
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
 
+  // Open external links in browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -44,6 +44,11 @@ function buildMenu() {
           label: 'Reload',
           accelerator: 'CmdOrCtrl+R',
           click: () => { if (mainWindow) mainWindow.reload(); }
+        },
+        {
+          label: 'Back',
+          accelerator: 'Alt+Left',
+          click: () => { if (mainWindow) mainWindow.webContents.goBack(); }
         },
         { type: 'separator' },
         {
@@ -68,8 +73,8 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+=',
           click: () => {
             if (mainWindow) {
-              const factor = mainWindow.webContents.getZoomFactor();
-              mainWindow.webContents.setZoomFactor(factor + 0.1);
+              const f = mainWindow.webContents.getZoomFactor();
+              mainWindow.webContents.setZoomFactor(f + 0.1);
             }
           }
         },
@@ -78,8 +83,8 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+-',
           click: () => {
             if (mainWindow) {
-              const factor = mainWindow.webContents.getZoomFactor();
-              mainWindow.webContents.setZoomFactor(factor - 0.1);
+              const f = mainWindow.webContents.getZoomFactor();
+              mainWindow.webContents.setZoomFactor(f - 0.1);
             }
           }
         },
@@ -104,17 +109,13 @@ function buildMenu() {
       label: 'Help',
       submenu: [
         {
-          label: 'Open Online Version',
-          click: () => shell.openExternal('https://winstar-solution-wh65.onrender.com')
-        },
-        {
           label: 'About Winstar',
           click: () => {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About Winstar',
               message: 'Winstar Uniform Management System',
-              detail: 'Version 2.0\nwinstar.co.ke\n\nUniform inventory management for security companies.',
+              detail: 'Version 2.0\nwinstar.co.ke\n\nUniform inventory for security companies.',
               buttons: ['OK']
             });
           }
@@ -131,10 +132,4 @@ app.whenReady().then(() => {
   createWindow();
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
+app.on('window-all-closed
