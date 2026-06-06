@@ -1,40 +1,139 @@
-# Winstar Desktop App
+const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
+const path = require('path');
 
-Winstar Uniform Inventory Management System — Desktop Edition
+let mainWindow;
 
-## Download
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 860,
+    minWidth: 900,
+    minHeight: 600,
+    title: 'Winstar | winstar.co.ke',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+    backgroundColor: '#0A0908',
+    show: false,
+  });
 
-Go to the [Releases page](../../releases) and download:
-- `Winstar-portable.exe` — run directly, no installation
-- `Winstar-Setup.exe` — installs with desktop shortcut
+  mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
-## Features
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
 
-- Full uniform inventory management
-- Guard profiles & dispatch tracking
-- Cloud sync via Supabase (cross-device)
-- Works offline with local storage
-- Excel/CSV export
-- QR code generation
-- Role-based access control
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
-## Development
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
 
-```bash
-# Install dependencies
-npm install
+function buildMenu() {
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Reload',
+          accelerator: 'CmdOrCtrl+R',
+          click: () => { if (mainWindow) mainWindow.reload(); }
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit',
+          accelerator: 'Alt+F4',
+          click: () => app.quit()
+        }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Full Screen',
+          accelerator: 'F11',
+          click: () => {
+            if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
+          }
+        },
+        {
+          label: 'Zoom In',
+          accelerator: 'CmdOrCtrl+=',
+          click: () => {
+            if (mainWindow) {
+              const factor = mainWindow.webContents.getZoomFactor();
+              mainWindow.webContents.setZoomFactor(factor + 0.1);
+            }
+          }
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          click: () => {
+            if (mainWindow) {
+              const factor = mainWindow.webContents.getZoomFactor();
+              mainWindow.webContents.setZoomFactor(factor - 0.1);
+            }
+          }
+        },
+        {
+          label: 'Reset Zoom',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.setZoomFactor(1);
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Developer Tools',
+          accelerator: 'F12',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.toggleDevTools();
+          }
+        }
+      ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Open Online Version',
+          click: () => shell.openExternal('https://winstar-solution-wh65.onrender.com')
+        },
+        {
+          label: 'About Winstar',
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'About Winstar',
+              message: 'Winstar Uniform Management System',
+              detail: 'Version 2.0\nwinstar.co.ke\n\nUniform inventory management for security companies.',
+              buttons: ['OK']
+            });
+          }
+        }
+      ]
+    }
+  ];
 
-# Run in development
-npm start
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
-# Build .exe
-npm run build:win
-```
+app.whenReady().then(() => {
+  buildMenu();
+  createWindow();
+});
 
-## Setup
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
 
-1. Download the `.exe` from Releases
-2. Run it
-3. Click **avatar → Database Setup**
-4. Enter your Supabase URL and anon key
-5. Create your account and sign in
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
