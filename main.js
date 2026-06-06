@@ -18,7 +18,8 @@ function createWindow() {
     show: false,
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  const { app: electronApp } = require('electron');
+mainWindow.loadURL('file://' + path.join(__dirname, 'index.html').replace(/\\/g, '/'));
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
