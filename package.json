@@ -16,6 +16,7 @@
   "build": {
     "appId": "co.ke.winstar.app",
     "productName": "Winstar",
+    "asar": false,
     "directories": {
       "output": "dist"
     },
