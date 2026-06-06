@@ -5,21 +5,21 @@ let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 860,
-    minWidth: 900,
-    minHeight: 600,
-    title: 'Winstar | winstar.co.ke',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-    backgroundColor: '#0A0908',
-    show: false,
-  });
+  width: 1400,
+  height: 860,
+  minWidth: 900,
+  minHeight: 600,
+  title: 'Winstar | winstar.co.ke',
+  webPreferences: {
+    nodeIntegration: false,
+    contextIsolation: true,
+    webSecurity: false
+  },
+  backgroundColor: '#0A0908',
+  show: false,
+});
 
-  const { app: electronApp } = require('electron');
-  mainWindow.loadFile('index.html');
+mainWindow.loadFile('index.html');
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
