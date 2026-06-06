@@ -21,7 +21,7 @@
     },
     "files": [
       "main.js",
-      "src/**/*"
+      "index.html"
     ],
     "win": {
       "target": [
