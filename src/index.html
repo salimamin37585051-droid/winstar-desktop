@@ -215,7 +215,25 @@ body.light .bsel{background:rgba(0,0,0,0.03);border-color:rgba(0,0,0,0.1);color:
 
 @media(max-width:960px){.mets{grid-template-columns:1fr 1fr}.tc{grid-template-columns:1fr}}
 @media(max-width:720px){#sidebar{width:50px}.ngl,.ni span,.sf{display:none}.ni{justify-content:center}}
-@media(max-width:560px){.login-wrap{grid-template-columns:1fr;width:95vw}.ll{display:none}.mets{grid-template-columns:1fr}#main{padding:14px}}
+@media(max-width:560px){
+  .login-wrap{grid-template-columns:1fr;width:95vw}
+  .ll{display:none}
+  .mets{grid-template-columns:1fr 1fr}
+  #main{padding:12px}
+  .tc{grid-template-columns:1fr}
+  .modal{width:95vw;padding:18px}
+  .modal-lg{width:95vw}
+  .mg{grid-template-columns:1fr}
+  table{font-size:11px}
+  th,td{padding:7px 10px}
+  .tb-brand{font-size:16px}
+  .tb-sep{display:none}
+  #session-indicator{display:none}
+}
+@media(max-width:380px){
+  .mets{grid-template-columns:1fr}
+  .mv{font-size:24px}
+}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
@@ -429,6 +447,18 @@ create policy "allow all" on ws_audit for all using (true) with check (true);
         </div>
         <div id="lsa" class="abar" style="display:none">&#9888; <strong>Low Stock:</strong> <span id="lsm"></span></div>
         <div class="mets" id="dm"></div>
+        <div id="stock-bar" style="margin-bottom:18px;background:var(--ink2);border:1px solid rgba(201,168,76,0.1);border-radius:var(--r);padding:14px 18px;display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-size:11px;font-weight:700;color:var(--fg3);letter-spacing:1px;text-transform:uppercase">Stock Breakdown</div>
+            <div id="stock-bar-legend" style="font-size:11px;color:var(--fg3)"></div>
+          </div>
+          <div style="height:20px;border-radius:6px;overflow:hidden;display:flex;background:rgba(201,168,76,0.06)">
+            <div id="sb-dispatched" style="height:100%;background:linear-gradient(to right,#1a5c35,#27AE60);transition:width .6s ease" title="With guards"></div>
+            <div id="sb-available" style="height:100%;background:linear-gradient(to right,#7a6530,#C9A84C);transition:width .6s ease" title="Available"></div>
+            <div id="sb-damaged" style="height:100%;background:linear-gradient(to right,#8b4a12,#E67E22);transition:width .6s ease" title="Damaged/Lost"></div>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:8px;flex-wrap:wrap" id="stock-bar-items"></div>
+        </div>
         <div class="tc">
           <div class="card"><div class="ch"><div class="ct">&#9655; Recent Dispatches</div><button class="ab abv" onclick="navTo('dispatches')">View All</button></div><div class="tw"><table><thead><tr><th>Date</th><th>Guard</th><th>Branch</th><th>Units</th></tr></thead><tbody id="ddisp"></tbody></table></div></div>
           <div class="card"><div class="ch"><div class="ct">&#9635; Stock by Category</div></div><div class="cbw" id="dchart"></div></div>
@@ -642,14 +672,21 @@ async function loadFromCloud() {
     var branches = await sbGet('ws_branches');
     var audit = await sbGet('ws_audit', '?order=id.desc&limit=100');
     DB.users = (users || []).map(function(u){
-    // map Supabase column names to app property names
-    u.lastLogin = u.last_login || u.lastLogin || 'Never';
-    return u;
-  });
-    DB.guards = guards || [];
-    DB.items = items || [];
-    DB.dispatches = (dispatches || []).map(function(d){d.items=JSON.parse(d.items_json||'[]');return d;});
-    DB.returns = (returns || []).map(function(r){r.items=JSON.parse(r.items_json||'[]');r.cond=r.cond||r.condition;return r;});
+      u.lastLogin = u.last_login || u.lastLogin || 'Never';
+      u._synced = true;
+      return u;
+    });
+    DB.guards = (guards || []).map(function(g){ g._synced=true; return g; });
+    DB.items = (items || []).map(function(i){
+      i._synced = true;
+      i.disp  = parseInt(i.disp)  || 0;
+      i.ret   = parseInt(i.ret)   || 0;
+      i.total = parseInt(i.total) || 0;
+      i.price = parseFloat(i.price) || 0;
+      return i;
+    });
+    DB.dispatches = (dispatches || []).map(function(d){d.items=JSON.parse(d.items_json||'[]').map(function(x){x.iid=parseInt(x.iid)||x.iid;x.qty=parseInt(x.qty)||1;return x;});d.gid=parseInt(d.gid)||d.gid;d.by=d.by_name||d.by||'';d._synced=true;return d;});
+    DB.returns = (returns || []).map(function(r){r.items=JSON.parse(r.items_json||'[]').map(function(x){x.iid=parseInt(x.iid)||x.iid;x.qty=parseInt(x.qty)||1;return x;});r.gid=parseInt(r.gid)||r.gid;r.cond=r.cond||r.condition||'good';r._synced=true;return r;});
     DB.requests = requests || [];
     DB.branches = (branches && branches.length) ? branches : DB.branches;
     DB.audit = (audit || []).map(function(a){a.time=a.ts;a.user=a.user_name;return a;});
@@ -810,8 +847,17 @@ async function cloudDelete(table, id) {
   try { await sbDelete(table,'?id=eq.'+id); } catch(e){ console.error('Delete error:',e); }
 }
 async function cloudUpdateItemStock(it) {
-  if (!USE_CLOUD || !it._synced) return;
-  try { await sbPatch('ws_items','?id=eq.'+it.id,{disp:it.disp,ret:it.ret}); } catch(e){ console.error('Stock update error:',e); }
+  if (!USE_CLOUD || !it.id) return;
+  try {
+    await sbPatch('ws_items','?id=eq.'+it.id,{disp:it.disp,ret:it.ret});
+    it._synced = true;
+  } catch(e) {
+    logError('cloudUpdateItemStock', e);
+    // retry once
+    setTimeout(async function(){
+      try { await sbPatch('ws_items','?id=eq.'+it.id,{disp:it.disp,ret:it.ret}); } catch(e2){}
+    }, 2000);
+  }
 }
 
 // ── PERSISTENT STORAGE ──
@@ -859,7 +905,13 @@ console.log("Winstar DB loaded. Users:", DB.users.length, "| Items:", DB.items.l
 
 function gG(id){for(var i=0;i<DB.guards.length;i++)if(DB.guards[i].id===id)return DB.guards[i];return {};}
 function gI(id){for(var i=0;i<DB.items.length;i++)if(DB.items[i].id===id)return DB.items[i];return {};}
-function av(it){return Math.max(0,it.total-it.disp+it.ret);}
+function av(it){
+  if(!it) return 0;
+  var t=parseInt(it.total)||0;
+  var d=parseInt(it.disp)||0;
+  var r=parseInt(it.ret)||0;
+  return Math.max(0, t - d + r);
+}
 function fd(d){try{return new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}catch(e){return d;}}
 function nid(arr){var m=0;for(var i=0;i<arr.length;i++)if(arr[i].id>m)m=arr[i].id;return m+1;}
 function nowT(){return new Date().toTimeString().slice(0,5);}
@@ -1298,6 +1350,29 @@ function rDash(){
   }
   var h="";for(var i=0;i<Math.min(5,DB.dispatches.length);i++){var d=DB.dispatches[i];var g=gG(d.gid);var c=0;for(var j=0;j<d.items.length;j++)c+=d.items[j].qty;h+='<tr><td>'+fd(d.date)+'</td><td class="tb">'+(g.name||"&mdash;")+'</td><td>'+d.branch+'</td><td>'+c+'</td></tr>';}
   document.getElementById("ddisp").innerHTML=h||eRow(4,"No dispatches yet");
+  // Stock breakdown bar
+  if(tS>0){
+    var bar=document.getElementById('stock-bar');
+    if(bar) bar.style.display='block';
+    var netOut=Math.max(0,tD-tR);
+    var dpct=Math.round(netOut/tS*100);
+    var apct=Math.round(tA/tS*100);
+    var dmgPct=Math.max(0,100-dpct-apct);
+    var sd=document.getElementById('sb-dispatched');
+    var sa=document.getElementById('sb-available');
+    var sdm=document.getElementById('sb-damaged');
+    if(sd) sd.style.width=dpct+'%';
+    if(sa) sa.style.width=apct+'%';
+    if(sdm) sdm.style.width=dmgPct+'%';
+    var leg=document.getElementById('stock-bar-legend');
+    if(leg) leg.textContent=tS+' total units';
+    var items=document.getElementById('stock-bar-items');
+    if(items) items.innerHTML=
+      '<span style="font-size:11px;color:var(--fg3)"><span style="color:#27AE60">&#9632;</span> With guards: '+netOut+'</span>'+
+      '<span style="font-size:11px;color:var(--fg3)"><span style="color:var(--g)">&#9632;</span> Available: '+tA+'</span>'+
+      '<span style="font-size:11px;color:var(--fg3)"><span style="color:var(--amber)">&#9632;</span> Damaged/Lost: '+(dam+lost)+'</span>';
+  }
+
   // Build SVG bar chart
   var cats=[];
   for(var i=0;i<DB.items.length;i++)if(cats.indexOf(DB.items[i].cat)<0)cats.push(DB.items[i].cat);
@@ -1610,36 +1685,115 @@ function openM(type,id){
       '</div>'+
       '<div class="mact"><button class="btn-c" onclick="closeM()">Cancel</button><button class="btn-s" onclick="saveGuard('+(g?g.id:0)+')">'+(g?"Update Guard":"Save Guard")+'</button></div>';
   }else if(type==="view-guard"){
-    var g=null;for(var i=0;i<DB.guards.length;i++)if(DB.guards[i].id===id){g=DB.guards[i];break;}
-    if(!g)return;
-    var disps=[];for(var j=0;j<DB.dispatches.length;j++)if(DB.dispatches[j].gid===g.id)disps.push(DB.dispatches[j]);
-    var rets=[];for(var j=0;j<DB.returns.length;j++)if(DB.returns[j].gid===g.id)rets.push(DB.returns[j]);
-    var uni=0;for(var j=0;j<disps.length;j++)for(var k=0;k<disps[j].items.length;k++)uni+=disps[j].items[k].qty;
-    var dm=0;for(var j=0;j<rets.length;j++)if(rets[j].cond!=="good")dm++;
-    m.className="modal modal-lg";
-    m.innerHTML='<div class="mtitle">&#9675; '+g.name+'</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">'+
+    var g=null;
+    for(var i=0;i<DB.guards.length;i++) if(DB.guards[i].id===id){g=DB.guards[i];break;}
+    if(!g) return;
+    var disps=[];
+    for(var j=0;j<DB.dispatches.length;j++) if(DB.dispatches[j].gid===g.id) disps.push(DB.dispatches[j]);
+    var rets=[];
+    for(var j=0;j<DB.returns.length;j++) if(DB.returns[j].gid===g.id) rets.push(DB.returns[j]);
+    var uni=0;
+    for(var j=0;j<disps.length;j++) for(var k=0;k<disps[j].items.length;k++) uni+=disps[j].items[k].qty;
+    var dm=0;
+    for(var j=0;j<rets.length;j++) if(rets[j].cond!=="good") dm++;
+
+    // Currently holding (dispatched minus returned)
+    var held={};
+    for(var j=0;j<disps.length;j++){
+      for(var k=0;k<disps[j].items.length;k++){
+        var iid=disps[j].items[k].iid;
+        var it=gI(iid);
+        if(!held[iid]) held[iid]={name:it.name,size:it.size,qty:0};
+        held[iid].qty+=disps[j].items[k].qty;
+      }
+    }
+    for(var j=0;j<rets.length;j++){
+      for(var k=0;k<rets[j].items.length;k++){
+        var rid=rets[j].items[k].iid;
+        if(held[rid]) held[rid].qty-=rets[j].items[k].qty;
+      }
+    }
+    var heldRows='';
+    for(var hk in held){
+      if(held[hk].qty>0){
+        heldRows+='<tr><td class="tb">'+held[hk].name+'</td>'+
+          '<td>'+held[hk].size+'</td>'+
+          '<td style="text-align:center;font-weight:800;color:var(--g)">'+held[hk].qty+'</td></tr>';
+      }
+    }
+
+    // Dispatch history rows
+    var histRows='';
+    var sd=disps.slice().sort(function(a,b){return b.date.localeCompare(a.date);});
+    for(var j=0;j<sd.length;j++){
+      var hItems=sd[j].items.map(function(x){var it=gI(x.iid);return it.name+' x'+x.qty;}).join(', ');
+      histRows+='<tr>'+
+        '<td class="tm">'+sd[j].ref+'</td>'+
+        '<td>'+fd(sd[j].date)+'</td>'+
+        '<td style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+hItems+'</td>'+
+        '<td><button class="ab abq" onclick="printDispatch('+sd[j].id+')" title="Print Slip">&#128424;</button></td>'+
+      '</tr>';
+    }
+
+    m.className='modal modal-lg';
+    m.innerHTML=
+      '<div class="mtitle">&#9675; '+g.name+'</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'+
         '<div>'+
-          '<div class="dr"><span class="dk">Guard ID</span><span class="dv">'+g.gid+'</span></div>'+
+          '<div class="dr"><span class="dk">Guard ID</span><span class="dv tm">'+g.gid+'</span></div>'+
           '<div class="dr"><span class="dk">Branch</span><span class="dv">'+g.branch+'</span></div>'+
           '<div class="dr"><span class="dk">Site</span><span class="dv">'+g.site+'</span></div>'+
           '<div class="dr"><span class="dk">Position</span><span class="dv">'+g.pos+'</span></div>'+
           '<div class="dr"><span class="dk">Phone</span><span class="dv">'+g.phone+'</span></div>'+
           '<div class="dr"><span class="dk">Joined</span><span class="dv">'+fd(g.joined)+'</span></div>'+
-          '<div class="dr"><span class="dk">Status</span><span class="dv">'+(g.status==="active"?'<span class="badge bg">Active</span>':'<span class="badge bgr">Inactive</span>')+'</span></div>'+
+          '<div class="dr"><span class="dk">Status</span><span class="dv">'+
+            (g.status==="active"?'<span class="badge bg">Active</span>':'<span class="badge bgr">Inactive</span>')+
+          '</span></div>'+
         '</div>'+
-        '<div style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:10px;padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
-          '<div style="text-align:center"><div style="font-size:28px;font-weight:800;color:var(--g)">'+uni+'</div><div style="font-size:11px;color:var(--fg3)">Issued</div></div>'+
-          '<div style="text-align:center"><div style="font-size:28px;font-weight:800;color:var(--green)">'+rets.length+'</div><div style="font-size:11px;color:var(--fg3)">Returned</div></div>'+
-          '<div style="text-align:center"><div style="font-size:28px;font-weight:800;color:var(--amber)">'+disps.length+'</div><div style="font-size:11px;color:var(--fg3)">Dispatches</div></div>'+
-          '<div style="text-align:center"><div style="font-size:28px;font-weight:800;color:var(--red)">'+dm+'</div><div style="font-size:11px;color:var(--fg3)">Damage/Loss</div></div>'+
+        '<div style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:10px;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start">'+
+          '<div style="text-align:center"><div style="font-size:26px;font-weight:800;color:var(--g)">'+uni+'</div><div style="font-size:10px;color:var(--fg3);margin-top:2px">Total Issued</div></div>'+
+          '<div style="text-align:center"><div style="font-size:26px;font-weight:800;color:var(--green)">'+rets.length+'</div><div style="font-size:10px;color:var(--fg3);margin-top:2px">Returns</div></div>'+
+          '<div style="text-align:center"><div style="font-size:26px;font-weight:800;color:var(--amber)">'+disps.length+'</div><div style="font-size:10px;color:var(--fg3);margin-top:2px">Dispatches</div></div>'+
+          '<div style="text-align:center"><div style="font-size:26px;font-weight:800;color:var(--red)">'+dm+'</div><div style="font-size:10px;color:var(--fg3);margin-top:2px">Damage/Loss</div></div>'+
         '</div>'+
       '</div>'+
-      '<div class="mact"><button class="btn-c" onclick="closeM()">Close</button></div>';
-  }else if(type==="add-dispatch"){
-    var gOpts="";for(var i=0;i<DB.guards.length;i++){var g=DB.guards[i];if(g.status==="active")gOpts+='<option value="'+g.id+'">'+g.name+' ('+g.gid+') &mdash; '+g.branch+'</option>';}
-    var iOpts="";for(var i=0;i<DB.items.length;i++){var it=DB.items[i];iOpts+='<option value="'+it.id+'">'+it.name+' '+it.size+' [avail:'+av(it)+']</option>';}
-    if(!gOpts){m.innerHTML='<div class="mtitle">&#9655; New Dispatch</div><div class="empty-state">No active guards. Add guards first.</div><div class="mact"><button class="btn-c" onclick="closeM()">Close</button></div>';return;}
+      (heldRows?
+        '<div style="margin-bottom:14px">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--fg3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Currently Holding</div>'+
+          '<table><thead><tr><th>Item</th><th>Size</th><th style="text-align:center">Qty</th></tr></thead>'+
+          '<tbody>'+heldRows+'</tbody></table>'+
+        '</div>':
+        '<div style="font-size:12px;color:var(--fg3);margin-bottom:14px;padding:10px;background:rgba(39,174,96,0.05);border-radius:6px;border:1px solid rgba(39,174,96,0.15)">&#10003; No items currently held by this guard</div>'
+      )+
+      (histRows?
+        '<div>'+
+          '<div style="font-size:10px;font-weight:700;color:var(--fg3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Dispatch History</div>'+
+          '<div style="max-height:150px;overflow-y:auto">'+
+            '<table><thead><tr><th>Ref</th><th>Date</th><th>Items</th><th></th></tr></thead>'+
+            '<tbody>'+histRows+'</tbody></table>'+
+          '</div>'+
+        '</div>':''
+      )+
+      '<div class="mact">'+
+        '<button class="btn-c" onclick="closeM()">Close</button>'+
+        '<button class="btn-s" onclick="openM('add-dispatch',0);setTimeout(function(){var sel=document.getElementById('dg');if(sel)for(var i=0;i<sel.options.length;i++)if(sel.options[i].value=='+g.id+'){sel.selectedIndex=i;break;}},200)">+ Dispatch to Guard</button>'+
+      '</div>';
+  >
+  } else if(type==="add-dispatch"){
+    var gOpts="";
+    for(var i=0;i<DB.guards.length;i++){
+      var g=DB.guards[i];
+      if(g.status==="active") gOpts+='<option value="'+g.id+'">'+g.name+' ('+g.gid+') &mdash; '+g.branch+'</option>';
+    }
+    var iOpts="";
+    for(var i=0;i<DB.items.length;i++){
+      var it=DB.items[i];
+      iOpts+='<option value="'+it.id+'">'+it.name+' '+it.size+' [avail:'+av(it)+']</option>';
+    }
+    if(!gOpts){
+      m.innerHTML='<div class="mtitle">&#9655; New Dispatch</div><div class="empty-state">No active guards. Add guards first.</div><div class="mact"><button class="btn-c" onclick="closeM()">Close</button></div>';
+      return;
+    }
     m.className='modal modal-lg';
     m.innerHTML='<div class="mtitle">&#9655; New Dispatch</div>'+
       '<div class="mg">'+
@@ -1652,10 +1806,14 @@ function openM(type,id){
       '<button onclick="addDispatchItemRow()" style="margin-top:8px;width:100%;padding:8px;border:1px dashed rgba(201,168,76,0.3);border-radius:8px;background:rgba(201,168,76,0.04);color:var(--g);cursor:pointer;font-size:13px;font-weight:600">+ Add Another Item</button>'+
       '<div class="mact"><button class="btn-c" onclick="closeM()">Cancel</button><button class="btn-s" onclick="saveDisp()">Record Dispatch</button></div>';
     addDispatchItemRow();
-  }else if(type==="view-dispatch"){
-    var d=null;for(var i=0;i<DB.dispatches.length;i++)if(DB.dispatches[i].id===id){d=DB.dispatches[i];break;}
-    if(!d)return;
-    var g=gG(d.gid);var rows="";for(var i=0;i<d.items.length;i++){var it=gI(d.items[i].iid);rows+='<tr><td>'+it.name+'</td><td>'+it.size+'</td><td>'+d.items[i].qty+'</td></tr>';}
+
+  } else if(type==="view-dispatch"){
+    var d=null;
+    for(var i=0;i<DB.dispatches.length;i++) if(DB.dispatches[i].id===id){d=DB.dispatches[i];break;}
+    if(!d) return;
+    var g=gG(d.gid);
+    var rows="";
+    for(var i=0;i<d.items.length;i++){var it=gI(d.items[i].iid);rows+='<tr><td>'+it.name+'</td><td>'+it.size+'</td><td>'+d.items[i].qty+'</td></tr>';}
     m.innerHTML='<div class="mtitle">&#9655; '+d.ref+'</div>'+
       '<div class="dr"><span class="dk">Date</span><span class="dv">'+fd(d.date)+'</span></div>'+
       '<div class="dr"><span class="dk">Guard</span><span class="dv">'+g.name+' ('+g.gid+')</span></div>'+
@@ -1663,10 +1821,13 @@ function openM(type,id){
       '<div class="dr"><span class="dk">Issued By</span><span class="dv">'+d.by+'</span></div>'+
       '<div class="dr"><span class="dk">Notes</span><span class="dv">'+(d.notes||"&mdash;")+'</span></div>'+
       '<div style="margin-top:14px"><table><thead><tr><th>Item</th><th>Size</th><th>Qty</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-      '<div class="mact"><button class="btn-c" onclick="closeM()">Close</button></div>';
-  }else if(type==="add-return"){
-    var gOpts="";for(var i=0;i<DB.guards.length;i++){var g=DB.guards[i];gOpts+='<option value="'+g.id+'">'+g.name+' ('+g.gid+')</option>';}
-    var dOpts="";for(var i=0;i<DB.dispatches.length;i++){var d=DB.dispatches[i];var g=gG(d.gid);dOpts+='<option value="'+d.id+'">'+d.ref+' &mdash; '+(g.name||"?")+'</option>';}
+      '<div class="mact"><button class="btn-c" onclick="closeM()">Close</button><button class="btn-s" onclick="printDispatch('+id+');closeM()">&#128424; Print Slip</button></div>';
+
+  } else if(type==="add-return"){
+    var gOpts="";
+    for(var i=0;i<DB.guards.length;i++){var g=DB.guards[i];gOpts+='<option value="'+g.id+'">'+g.name+' ('+g.gid+')</option>';}
+    var dOpts="";
+    for(var i=0;i<DB.dispatches.length;i++){var d=DB.dispatches[i];var g=gG(d.gid);dOpts+='<option value="'+d.id+'">'+d.ref+' &mdash; '+(g.name||"?")+' ('+fd(d.date)+')</option>';}
     m.innerHTML='<div class="mtitle">&#8617; Record Return</div>'+
       '<div class="fl"><label>Guard *</label><select class="fi" id="rg">'+gOpts+'</select></div>'+
       '<div class="fl"><label>Original Dispatch *</label><select class="fi" id="rd2">'+dOpts+'</select></div>'+
@@ -1676,16 +1837,20 @@ function openM(type,id){
       '</div>'+
       '<div class="fl"><label>Notes</label><textarea class="fi fi-ta" id="rnotes" placeholder="Describe damage if applicable"></textarea></div>'+
       '<div class="mact"><button class="btn-c" onclick="closeM()">Cancel</button><button class="btn-s" onclick="saveRet()">Record Return</button></div>';
-  }else if(type==="add-request"){
-    var gOpts="";for(var i=0;i<DB.guards.length;i++){var g=DB.guards[i];if(g.status==="active")gOpts+='<option value="'+g.id+'">'+g.name+' ('+g.gid+')</option>';}
+
+  } else if(type==="add-request"){
+    var gOpts="";
+    for(var i=0;i<DB.guards.length;i++){var g=DB.guards[i];if(g.status==="active")gOpts+='<option value="'+g.id+'">'+g.name+' ('+g.gid+')</option>';}
     m.innerHTML='<div class="mtitle">&#8853; Replacement Request</div>'+
       '<div class="fl"><label>Guard *</label><select class="fi" id="rqg">'+gOpts+'</select></div>'+
       '<div class="fl"><label>Item Needed *</label><input class="fi" id="rqi" placeholder="e.g. Guard Shirt M"></div>'+
       '<div class="fl"><label>Reason *</label><input class="fi" id="rqr" placeholder="e.g. Damaged, Lost, Worn out"></div>'+
       '<div class="fl"><label>Priority</label><select class="fi" id="rqp"><option value="normal">Normal</option><option value="urgent">Urgent</option></select></div>'+
       '<div class="mact"><button class="btn-c" onclick="closeM()">Cancel</button><button class="btn-s" onclick="saveReq()">Submit</button></div>';
-  }else if(type==="add-branch"||type==="edit-branch"){
-    var b=null;if(id)for(var i=0;i<DB.branches.length;i++)if(DB.branches[i].id===id){b=DB.branches[i];break;}
+
+  } else if(type==="add-branch"||type==="edit-branch"){
+    var b=null;
+    if(id) for(var i=0;i<DB.branches.length;i++) if(DB.branches[i].id===id){b=DB.branches[i];break;}
     m.innerHTML='<div class="mtitle">&#8862; '+(b?"Edit Branch":"Add Branch")+'</div>'+
       '<div class="fl"><label>Branch Name *</label><input class="fi" id="bn" placeholder="e.g. Eldoret Branch" value="'+(b?b.name:"")+'"></div>'+
       '<div class="fl"><label>Location *</label><input class="fi" id="bl" placeholder="e.g. Eldoret Town" value="'+(b?b.loc:"")+'"></div>'+
@@ -1694,24 +1859,57 @@ function openM(type,id){
       '<div class="mact"><button class="btn-c" onclick="closeM()">Cancel</button><button class="btn-s" onclick="saveBranch('+(b?b.id:0)+')">'+(b?"Update":"Add Branch")+'</button></div>';
   }
 }
+
 function closeM(){document.getElementById("mbg").classList.remove("on");}
 
+// ══════════════════════════════════════════
+// ADD DISPATCH ITEM ROW
+// ══════════════════════════════════════════
+function addDispatchItemRow(){
+  var iOpts="";
+  for(var i=0;i<DB.items.length;i++){
+    var it=DB.items[i];
+    iOpts+='<option value="'+it.id+'">'+it.name+' ('+it.size+') &mdash; avail:'+av(it)+'</option>';
+  }
+  var list=document.getElementById('disp-items-list');
+  if(!list) return;
+  var idx=list.children.length;
+  var row=document.createElement('div');
+  row.style.cssText='display:grid;grid-template-columns:1fr 80px 32px;gap:8px;align-items:end';
+  row.innerHTML=
+    '<div><select class="fi disp-item-sel" style="width:100%">'+iOpts+'</select></div>'+
+    '<div><input class="fi disp-item-qty" type="number" min="1" value="1" placeholder="Qty"></div>'+
+    (idx>0?'<button onclick="this.parentNode.remove()" style="padding:8px;border-radius:6px;background:rgba(192,57,43,0.1);border:1px solid rgba(192,57,43,0.2);color:#e87b6e;cursor:pointer;height:38px">&#10005;</button>':'<div></div>');
+  list.appendChild(row);
+}
+
+// ══════════════════════════════════════════
+// SAVE FUNCTIONS
+// ══════════════════════════════════════════
 function saveItem(eid){
-  var errors=validateForm([
-    {id:"mn",label:"Item name",required:true},
-    {id:"mq",label:"Quantity",required:true,isNum:true,min:0},
-    {id:"mp",label:"Unit price",isNum:true,min:0}
-  ]);
+  var errors=validateForm([{id:"mn",label:"Item name",required:true},{id:"mq",label:"Quantity",required:true,isNum:true,min:0}]);
   if(errors.length){toast(errors[0],"tr");return;}
   var n=document.getElementById("mn").value.trim();
   var q=parseInt(document.getElementById("mq").value)||0;
   if(eid){
-    for(var i=0;i<DB.items.length;i++)if(DB.items[i].id===eid){var it=DB.items[i];it.name=n;it.cat=document.getElementById("mc").value;it.size=document.getElementById("ms").value;it.branch=document.getElementById("mb").value;it.total=q;it.price=parseFloat(document.getElementById("mp").value)||0;break;}
+    var updIt=null;
+    for(var i=0;i<DB.items.length;i++) if(DB.items[i].id===eid){
+      var it=DB.items[i];
+      it.name=n;it.cat=document.getElementById("mc").value;
+      it.size=document.getElementById("ms").value;
+      it.branch=document.getElementById("mb").value;
+      it.total=q;it.price=parseFloat(document.getElementById("mp").value)||0;
+      updIt=it; break;
+    }
     addAudit(CU?CU.username:"?","Item updated: "+n,"create");
-    cloudSaveItem(DB.items.find(function(x){return x.id===eid;}));
+    if(updIt) cloudSaveItem(updIt);
     toast("Item updated ✓");
-  }else{
-    var ni={id:nid(DB.items),name:n,cat:document.getElementById("mc").value,size:document.getElementById("ms").value||"One Size",branch:document.getElementById("mb").value,total:q,disp:0,ret:0,price:parseFloat(document.getElementById("mp").value)||0};
+  } else {
+    var ni={id:nid(DB.items),name:n,cat:document.getElementById("mc").value,
+      size:document.getElementById("ms").value||"One Size",
+      branch:document.getElementById("mb").value,
+      total:q,disp:0,ret:0,
+      price:parseFloat(document.getElementById("mp").value)||0};
     DB.items.push(ni);
     addAudit(CU?CU.username:"?","New item: "+n,"create");
     cloudSaveItem(ni);
@@ -1721,21 +1919,15 @@ function saveItem(eid){
 }
 
 function saveGuard(eid){
-  var gerrors=validateForm([
-    {id:"gn",label:"Full name",required:true},
-    {id:"gid2",label:"Guard ID",required:true},
-    {id:"gbr2",label:"Branch",required:true},
-    {id:"gph",label:"Phone number"}
-  ]);
+  var gerrors=validateForm([{id:"gn",label:"Full name",required:true},{id:"gid2",label:"Guard ID",required:true}]);
   if(gerrors.length){toast(gerrors[0],"tr");return;}
   var n=document.getElementById("gn").value.trim();
   var gid=document.getElementById("gid2").value.trim();
   if(eid){
     var updG=null;
-    for(var i=0;i<DB.guards.length;i++)if(DB.guards[i].id===eid){
+    for(var i=0;i<DB.guards.length;i++) if(DB.guards[i].id===eid){
       var g=DB.guards[i];
-      g.name=n;g.gid=gid;
-      g.branch=document.getElementById("gbr2").value;
+      g.name=n;g.gid=gid;g.branch=document.getElementById("gbr2").value;
       g.site=document.getElementById("gsite").value;
       g.pos=document.getElementById("gpos").value||"Guard";
       g.phone=document.getElementById("gph").value;
@@ -1746,15 +1938,14 @@ function saveGuard(eid){
     addAudit(CU?CU.username:"?","Guard updated: "+n,"create");
     if(updG) cloudSaveGuard(updG);
     toast("Guard updated ✓");
-  }else{
+  } else {
     var ng={id:nid(DB.guards),gid:gid,name:n,
       branch:document.getElementById("gbr2").value,
       site:document.getElementById("gsite").value||"",
       pos:document.getElementById("gpos").value||"Guard",
       phone:document.getElementById("gph").value||"",
       status:document.getElementById("gst2").value,
-      joined:document.getElementById("gjd").value
-    };
+      joined:document.getElementById("gjd").value};
     DB.guards.push(ng);
     addAudit(CU?CU.username:"?","New guard: "+gid+" "+n,"create");
     cloudSaveGuard(ng);
@@ -1763,40 +1954,52 @@ function saveGuard(eid){
   saveDB();closeM();rGuards();
 }
 
-
-function addDispatchItemRow() {
-  var iOpts="";
-  for(var i=0;i<DB.items.length;i++){
-    var it=DB.items[i];
-    iOpts+='<option value="'+it.id+'">'+it.name+' ('+it.size+') — avail: '+av(it)+'</option>';
-  }
-  var list=document.getElementById('disp-items-list');
-  if(!list)return;
-  var idx=list.children.length;
-  var row=document.createElement('div');
-  row.className='mg';
-  row.style.cssText='display:grid;grid-template-columns:1fr 80px 32px;gap:8px;align-items:end';
-  row.innerHTML=
-    '<div><select class="fi disp-item-sel" style="width:100%">'+iOpts+'</select></div>'+
-    '<div><input class="fi disp-item-qty" type="number" min="1" value="1" placeholder="Qty"></div>'+
-    (idx>0?'<button onclick="this.parentNode.remove()" style="padding:8px;border-radius:6px;background:rgba(192,57,43,0.1);border:1px solid rgba(192,57,43,0.2);color:#e87b6e;cursor:pointer;height:38px">✕</button>':'<div></div>');
-  list.appendChild(row);
-}
-
 function saveDisp(){
   var gid=parseInt(document.getElementById("dg").value);
-  var iid=parseInt(document.getElementById("di").value);
-  var qty=parseInt(document.getElementById("dq").value)||1;
   var date=document.getElementById("dd2").value;
-  var item=null;for(var i=0;i<DB.items.length;i++)if(DB.items[i].id===iid){item=DB.items[i];break;}
-  if(!item||qty>av(item)){toast("Only "+(item?av(item):0)+" units available","tr");return;}
   var guard=gG(gid);
+  var selects=document.querySelectorAll('.disp-item-sel');
+  var qtys=document.querySelectorAll('.disp-item-qty');
+  var dispItems=[];
+  for(var i=0;i<selects.length;i++){
+    var iid=parseInt(selects[i].value);
+    var qty=parseInt(qtys[i].value)||1;
+    var item=null;
+    for(var j=0;j<DB.items.length;j++) if(DB.items[j].id===iid){item=DB.items[j];break;}
+    if(!item){toast("Item not found","tr");return;}
+    if(qty>av(item)){toast("Only "+av(item)+" units available for "+item.name,"tr");return;}
+    dispItems.push({iid:iid,qty:qty});
+  }
+  if(dispItems.length===0){toast("Add at least one item","tr");return;}
   var ref="DSP-"+String(DB.dispatches.length+1).padStart(4,"0");
-  DB.dispatches.unshift({id:nid(DB.dispatches),ref:ref,gid:gid,date:date,branch:guard.branch||"HQ - Nairobi",items:[{iid:iid,qty:qty}],by:CU?CU.name:"System",notes:document.getElementById("dn").value.trim()});
-  item.disp+=qty;
-  addAudit(CU?CU.username:"?","Dispatch "+ref+" to "+guard.name+" &mdash; "+item.name+" x"+qty,"dispatch");
-  saveDB();cloudSaveDispatch(DB.dispatches[0]);cloudUpdateItemStock(item);closeM();rDisp();updBadges();chkLow();toast("Dispatch recorded ✓");
-}
+  var newDisp={id:nid(DB.dispatches),ref:ref,gid:gid,date:date,
+    branch:guard.branch||"HQ - Nairobi",items:dispItems,
+    by:CU?CU.name:"System",
+    notes:document.getElementById("dn").value.trim()};
+  DB.dispatches.unshift(newDisp);
+  var itemNames=[];
+  for(var i=0;i<dispItems.length;i++){
+    for(var j=0;j<DB.items.length;j++){
+      if(DB.items[j].id===dispItems[i].iid){
+        DB.items[j].disp+=dispItems[i].qty;
+        itemNames.push(DB.items[j].name+" x"+dispItems[i].qty);
+        break;
+      }
+    }
+  }
+  addAudit(CU?CU.username:"?","Dispatch "+ref+" to "+guard.name+" — "+itemNames.join(", "),"dispatch");
+  saveDB();
+  cloudSaveDispatch(newDisp);
+  setTimeout(function(){
+    for(var i=0;i<dispItems.length;i++){
+      for(var j=0;j<DB.items.length;j++){
+        if(DB.items[j].id===dispItems[i].iid){cloudUpdateItemStock(DB.items[j]);break;}
+      }
+    }
+  },500);
+  closeM();rDisp();updBadges();chkLow();
+  setTimeout(function(){rDash();},300);
+  toast("Dispatch recorded ✓ ("+dispItems.length+" item"+(dispItems.length!==1?"s":"")+")");}
 
 function saveRet(){
   var gid=parseInt(document.getElementById("rg").value);
@@ -1804,22 +2007,36 @@ function saveRet(){
   var cond=document.getElementById("rcond2").value;
   var date=document.getElementById("rdate").value;
   var guard=gG(gid);
-  var disp=null;for(var i=0;i<DB.dispatches.length;i++)if(DB.dispatches[i].id===did){disp=DB.dispatches[i];break;}
+  var disp=null;
+  for(var i=0;i<DB.dispatches.length;i++) if(DB.dispatches[i].id===did){disp=DB.dispatches[i];break;}
   var ref="RET-"+String(DB.returns.length+1).padStart(4,"0");
-  DB.returns.unshift({id:nid(DB.returns),ref:ref,gid:gid,date:date,branch:guard.branch||"HQ - Nairobi",dref:disp?disp.ref:"&mdash;",items:disp?disp.items:[],cond:cond,notes:document.getElementById("rnotes").value.trim()});
-  if(cond!=="lost"&&disp)for(var i=0;i<disp.items.length;i++)for(var j=0;j<DB.items.length;j++)if(DB.items[j].id===disp.items[i].iid){DB.items[j].ret+=disp.items[i].qty;break;}
-  addAudit(CU?CU.username:"?","Return "+ref+" from "+guard.name+" &mdash; "+cond,"return");
-  saveDB();
-  cloudSaveReturn(DB.returns[0]);
-  // update item stock on return
+  DB.returns.unshift({id:nid(DB.returns),ref:ref,gid:gid,date:date,
+    branch:guard.branch||"HQ - Nairobi",
+    dref:disp?disp.ref:"—",
+    items:disp?disp.items:[],cond:cond,
+    notes:document.getElementById("rnotes").value.trim()});
   if(cond!=="lost"&&disp){
     for(var i=0;i<disp.items.length;i++){
-      var it2=null;for(var j=0;j<DB.items.length;j++)if(DB.items[j].id===disp.items[i].iid){it2=DB.items[j];break;}
-      if(it2) cloudUpdateItemStock(it2);
+      for(var j=0;j<DB.items.length;j++){
+        if(DB.items[j].id===disp.items[i].iid){DB.items[j].ret+=disp.items[i].qty;break;}
+      }
     }
   }
-  closeM();rRet();updBadges();toast("Return recorded ✓");
-}
+  addAudit(CU?CU.username:"?","Return "+ref+" from "+guard.name+" — "+cond,"return");
+  saveDB();
+  cloudSaveReturn(DB.returns[0]);
+  setTimeout(function(){
+    if(cond!=="lost"&&disp){
+      for(var i=0;i<disp.items.length;i++){
+        for(var j=0;j<DB.items.length;j++){
+          if(DB.items[j].id===disp.items[i].iid){cloudUpdateItemStock(DB.items[j]);break;}
+        }
+      }
+    }
+  },500);
+  closeM();rRet();updBadges();
+  setTimeout(function(){rDash();},300);
+  toast("Return recorded ✓");}
 
 function saveReq(){
   var gid=parseInt(document.getElementById("rqg").value);
@@ -1827,65 +2044,78 @@ function saveReq(){
   var reason=document.getElementById("rqr").value.trim();
   if(!item||!reason){toast("Item and reason required","tr");return;}
   var ref="REQ-"+String(DB.requests.length+1).padStart(4,"0");
-  DB.requests.unshift({id:nid(DB.requests),ref:ref,gid:gid,date:new Date().toISOString().slice(0,10),item:item,reason:reason,priority:document.getElementById("rqp").value,status:"pending"});
+  DB.requests.unshift({id:nid(DB.requests),ref:ref,gid:gid,
+    date:new Date().toISOString().slice(0,10),
+    item:item,reason:reason,
+    priority:document.getElementById("rqp").value,status:"pending"});
   addAudit(CU?CU.username:"?","Request "+ref+" submitted","create");
-  saveDB();cloudSaveRequest(DB.requests[0]);closeM();rReqs();updBadges();toast("Request submitted");
-}
+  saveDB();cloudSaveRequest(DB.requests[0]);
+  closeM();rReqs();updBadges();toast("Request submitted");}
 
 function saveBranch(eid){
   var n=document.getElementById("bn").value.trim();
   var l=document.getElementById("bl").value.trim();
   if(!n||!l){toast("Name and location required","tr");return;}
   if(eid){
-    for(var i=0;i<DB.branches.length;i++)if(DB.branches[i].id===eid){var b=DB.branches[i];b.name=n;b.loc=l;b.mgr=document.getElementById("bm").value;if(document.getElementById("bst"))b.status=document.getElementById("bst").value;break;}
-    addAudit(CU?CU.username:"?","Branch updated: "+n,"create");
-    cloudSaveBranch(DB.branches.find(function(x){return x.id===eid;}));
-    toast("Branch updated ✓");
-  }else{
+    for(var i=0;i<DB.branches.length;i++) if(DB.branches[i].id===eid){
+      var b=DB.branches[i];b.name=n;b.loc=l;
+      b.mgr=document.getElementById("bm").value;
+      if(document.getElementById("bst"))b.status=document.getElementById("bst").value;
+      break;
+    }
+    addAudit(CU?CU.username:"?","Branch updated: "+n,"create");toast("Branch updated ✓");
+  } else {
     var nb={id:nid(DB.branches),name:n,loc:l,mgr:document.getElementById("bm").value||"TBD",status:"active"};
     DB.branches.push(nb);
     addAudit(CU?CU.username:"?","Branch added: "+n,"create");
     cloudSaveBranch(nb);
     toast("Branch added ✓");
   }
-  saveDB();closeM();rBranches();
-}
+  saveDB();closeM();rBranches();}
 
+// ══════════════════════════════════════════
+// DELETE
+// ══════════════════════════════════════════
 function confDel(type,id){
   var labels={item:"inventory item",guard:"guard profile",dispatch:"dispatch record",return:"return record",request:"request",branch:"branch",user:"user account"};
   var m=document.getElementById("mi");
   document.getElementById("mbg").classList.add("on");
   m.className="modal";
-  m.innerHTML='<div style="text-align:center;padding:6px 0"><div style="font-size:36px;margin-bottom:10px">&#9888;</div><div class="mtitle" style="justify-content:center">Delete '+(labels[type]||"record")+'?</div><div style="font-size:13px;color:var(--fg3);margin-bottom:22px">This is permanent and cannot be undone.</div><div style="display:flex;gap:10px;justify-content:center"><button class="btn-c" onclick="closeM()">Cancel</button><button class="btn-d" onclick="execDel(\''+type+'\','+id+')">Yes, Delete</button></div></div>';
-}
+  m.innerHTML='<div style="text-align:center;padding:6px 0">'+
+    '<div style="font-size:34px;margin-bottom:10px">&#9888;</div>'+
+    '<div class="mtitle" style="justify-content:center">Delete '+(labels[type]||"record")+'?</div>'+
+    '<div style="font-size:13px;color:var(--fg3);margin-bottom:22px">This is permanent and cannot be undone.</div>'+
+    '<div style="display:flex;gap:10px;justify-content:center">'+
+      '<button class="btn-c" onclick="closeM()">Cancel</button>'+
+      '<button class="btn-d" onclick="execDel(''+type+'','+id+')">Yes, Delete</button>'+
+    '</div></div>';}
 
 function execDel(type,id){
   if(type==="item"){DB.items=DB.items.filter(function(i){return i.id!==id;});rInv();}
   else if(type==="guard"){DB.guards=DB.guards.filter(function(g){return g.id!==id;});rGuards();}
-  else if(type==="dispatch"){var d=null;for(var i=0;i<DB.dispatches.length;i++)if(DB.dispatches[i].id===id){d=DB.dispatches[i];break;}if(d)for(var i=0;i<d.items.length;i++)for(var j=0;j<DB.items.length;j++)if(DB.items[j].id===d.items[i].iid){DB.items[j].disp=Math.max(0,DB.items[j].disp-d.items[i].qty);break;}DB.dispatches=DB.dispatches.filter(function(x){return x.id!==id;});rDisp();}
-  else if(type==="return"){var r=null;for(var i=0;i<DB.returns.length;i++)if(DB.returns[i].id===id){r=DB.returns[i];break;}if(r&&r.cond!=="lost"){var d2=null;for(var i=0;i<DB.dispatches.length;i++)if(DB.dispatches[i].ref===r.dref){d2=DB.dispatches[i];break;}if(d2)for(var i=0;i<d2.items.length;i++)for(var j=0;j<DB.items.length;j++)if(DB.items[j].id===d2.items[i].iid){DB.items[j].ret=Math.max(0,DB.items[j].ret-d2.items[i].qty);break;}}DB.returns=DB.returns.filter(function(x){return x.id!==id;});rRet();}
+  else if(type==="dispatch"){
+    var d=null;for(var i=0;i<DB.dispatches.length;i++)if(DB.dispatches[i].id===id){d=DB.dispatches[i];break;}
+    if(d) for(var i=0;i<d.items.length;i++) for(var j=0;j<DB.items.length;j++) if(DB.items[j].id===d.items[i].iid){DB.items[j].disp=Math.max(0,DB.items[j].disp-d.items[i].qty);break;}
+    DB.dispatches=DB.dispatches.filter(function(x){return x.id!==id;});rDisp();}
+  else if(type==="return"){
+    var r=null;for(var i=0;i<DB.returns.length;i++)if(DB.returns[i].id===id){r=DB.returns[i];break;}
+    if(r&&r.cond!=="lost"){var d2=null;for(var i=0;i<DB.dispatches.length;i++)if(DB.dispatches[i].ref===r.dref){d2=DB.dispatches[i];break;}if(d2)for(var i=0;i<d2.items.length;i++)for(var j=0;j<DB.items.length;j++)if(DB.items[j].id===d2.items[i].iid){DB.items[j].ret=Math.max(0,DB.items[j].ret-d2.items[i].qty);break;}}
+    DB.returns=DB.returns.filter(function(x){return x.id!==id;});rRet();}
   else if(type==="request"){DB.requests=DB.requests.filter(function(x){return x.id!==id;});rReqs();}
   else if(type==="branch"){DB.branches=DB.branches.filter(function(x){return x.id!==id;});rBranches();}
   else if(type==="user"){DB.users=DB.users.filter(function(x){return x.id!==id;});rUsers();}
   addAudit(CU?CU.username:"?",type+" deleted","delete");
-  saveDB();
-  // sync delete to cloud
-  if(USE_CLOUD){
-    var tmap={item:"ws_items",guard:"ws_guards",dispatch:"ws_dispatches",return:"ws_returns",request:"ws_requests",branch:"ws_branches",user:"ws_users"};
-    if(tmap[type]) cloudDelete(tmap[type],id);
-  }
-  updBadges();closeM();toast("Deleted");
-}
+  if(USE_CLOUD){var tmap={item:"ws_items",guard:"ws_guards",dispatch:"ws_dispatches",return:"ws_returns",request:"ws_requests",branch:"ws_branches",user:"ws_users"};if(tmap[type])cloudDelete(tmap[type],id);}
+  saveDB();updBadges();closeM();toast("Deleted");}
 
+// ══════════════════════════════════════════
+// REAL QR CODE
+// ══════════════════════════════════════════
 function showQR(itemId){
   var item=null;
   for(var i=0;i<DB.items.length;i++) if(DB.items[i].id===itemId){item=DB.items[i];break;}
   if(!item) return;
-  var qrData=JSON.stringify({
-    id:"WS-"+String(itemId).padStart(4,"0"),
-    name:item.name,cat:item.cat,
-    size:item.size,branch:item.branch,available:av(item)
-  });
+  var qrData=JSON.stringify({id:"WS-"+String(itemId).padStart(4,"0"),name:item.name,cat:item.cat,size:item.size,branch:item.branch,available:av(item)});
   var m=document.getElementById("mi");
   document.getElementById("mbg").classList.add("on");
   m.innerHTML=
@@ -1897,60 +2127,143 @@ function showQR(itemId){
     '</div>'+
     '<div style="font-size:11px;color:var(--fg3);margin-top:10px;text-align:center">Scan with any QR reader to look up this item</div>'+
     '<div class="mact"><button class="btn-c" onclick="closeM()">Close</button><button class="btn-s" onclick="downloadQR()">&#8595; Save PNG</button></div>';
-  // Generate real QR code
   setTimeout(function(){
     var container=document.getElementById("qr-render");
     if(!container) return;
-    if(typeof QRCode !== "undefined"){
+    if(typeof QRCode!=="undefined"){
       new QRCode(container,{text:qrData,width:160,height:160,colorDark:"#0A0908",colorLight:"#ffffff",correctLevel:QRCode.CorrectLevel.M});
     } else {
-      container.innerHTML='<div style="padding:16px;font-size:10px;word-break:break-all;color:#000;max-width:160px">'+qrData+'</div>';
+      container.innerHTML='<div style="padding:14px;font-size:10px;word-break:break-all;color:#000;max-width:160px">'+qrData+'</div>';
     }
-  },150);
-}
+  },150);}
 
 function downloadQR(){
   var canvas=document.querySelector("#qr-render canvas");
   if(canvas){var a=document.createElement("a");a.download="winstar-qr.png";a.href=canvas.toDataURL();a.click();}
-  else toast("Right-click the QR to save","tb");
-}
+  else toast("Right-click the QR to save","tb");}
 
+// ══════════════════════════════════════════
+// PRINT DISPATCH SLIP
+// ══════════════════════════════════════════
+function printDispatch(id){
+  var d=null;
+  for(var i=0;i<DB.dispatches.length;i++) if(DB.dispatches[i].id===id){d=DB.dispatches[i];break;}
+  if(!d) return;
+  var g=gG(d.gid);
+  var itemRows='';var total=0;
+  for(var i=0;i<d.items.length;i++){
+    var it=gI(d.items[i].iid);var qty=d.items[i].qty;var val=qty*(it.price||0);total+=val;
+    itemRows+='<tr><td>'+(i+1)+'</td><td>'+it.name+'</td><td>'+it.cat+'</td><td>'+it.size+'</td><td style="text-align:center">'+qty+'</td><td style="text-align:right">KES '+Number(it.price||0).toLocaleString()+'</td><td style="text-align:right">KES '+val.toLocaleString()+'</td></tr>';
+  }
+  var slip='<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:30px;color:#1a1a1a">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #C9A84C">'+
+      '<div><div style="font-size:26px;font-weight:800;color:#C9A84C">WINSTAR</div>'+
+      '<div style="font-size:11px;color:#666;letter-spacing:2px">UNIFORM MANAGEMENT</div>'+
+      '<div style="font-size:11px;color:#666">winstar.co.ke</div></div>'+
+      '<div style="text-align:right"><div style="font-size:20px;font-weight:700">DISPATCH SLIP</div>'+
+      '<div style="font-size:13px;color:#666">Ref: '+d.ref+'</div>'+
+      '<div style="font-size:13px;color:#666">Date: '+fd(d.date)+'</div>'+
+      '<div style="font-size:13px;color:#666">Branch: '+d.branch+'</div></div>'+
+    '</div>'+
+    '<table style="width:100%;margin-bottom:20px;border-collapse:collapse">'+
+      '<tr><td style="padding:6px 0;width:50%"><strong>Guard:</strong> '+g.name+'</td><td style="padding:6px 0"><strong>ID:</strong> '+g.gid+'</td></tr>'+
+      '<tr><td style="padding:6px 0"><strong>Position:</strong> '+g.pos+'</td><td style="padding:6px 0"><strong>Site:</strong> '+g.site+'</td></tr>'+
+      '<tr><td style="padding:6px 0"><strong>Issued By:</strong> '+d.by+'</td><td style="padding:6px 0"><strong>Notes:</strong> '+(d.notes||'&mdash;')+'</td></tr>'+
+    '</table>'+
+    '<table style="width:100%;border-collapse:collapse;margin:16px 0">'+
+      '<thead><tr>'+['#','Item','Category','Size','Qty','Unit Price','Total Value'].map(function(h){return'<th style="background:#f5f5f5;padding:8px 12px;text-align:left;font-size:12px;border:1px solid #ddd">'+h+'</th>';}).join('')+'</tr></thead>'+
+      '<tbody>'+itemRows+'</tbody>'+
+      '<tfoot><tr><td colspan="6" style="text-align:right;font-weight:700;padding:8px 12px;border-top:2px solid #C9A84C">TOTAL VALUE:</td>'+
+      '<td style="text-align:right;font-weight:700;padding:8px 12px;border:1px solid #ddd;border-top:2px solid #C9A84C">KES '+total.toLocaleString()+'</td></tr></tfoot>'+
+    '</table>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px">'+
+      '<div><div style="border-top:1px solid #666;padding-top:6px;font-size:11px;color:#666;margin-top:40px">Issued By (Signature &amp; Date)</div></div>'+
+      '<div><div style="border-top:1px solid #666;padding-top:6px;font-size:11px;color:#666;margin-top:40px">Received By Guard (Signature &amp; Date)</div></div>'+
+    '</div>'+
+    '<div style="margin-top:24px;padding:10px;background:#f9f9f9;border-radius:6px;font-size:11px;color:#666;text-align:center">'+
+      'This is an official record of uniform issuance. The guard is responsible for all items listed.'+
+    '</div>'+
+  '</div>';
+  var win=window.open('','_blank','width=900,height=700');
+  win.document.write('<!DOCTYPE html><html><head><title>'+d.ref+'</title></head><body>'+slip+
+    '<div style="text-align:center;padding:20px"><button onclick="window.print()" style="padding:10px 24px;background:#C9A84C;color:#000;border:none;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;margin-right:10px">&#128424; Print / Save PDF</button>'+
+    '<button onclick="window.close()" style="padding:10px 24px;background:#eee;color:#333;border:none;border-radius:6px;font-size:14px;cursor:pointer">Close</button></div>'+
+    '</body></html>');
+  win.document.close();}
 
+// ══════════════════════════════════════════
+// EXPORT CSV
+// ══════════════════════════════════════════
 function exportCSV(mod){
+  mod=mod||"all";
   var csv="",fn="winstar-export.csv";
-  if(mod==="inventory"||mod==="all"){csv+="INVENTORY\nItem,Category,Size,Branch,Total,Dispatched,Available\n";for(var i=0;i<DB.items.length;i++){var it=DB.items[i];csv+=it.name+","+it.cat+","+it.size+","+it.branch+","+it.total+","+it.disp+","+av(it)+"\n";}fn="winstar-inventory.csv";}
-  if(mod==="guards"||mod==="all"){csv+="\nGUARD PROFILES\nGuard ID,Name,Branch,Site,Position,Phone,Status\n";for(var i=0;i<DB.guards.length;i++){var g=DB.guards[i];csv+=g.gid+","+g.name+","+g.branch+","+g.site+","+g.pos+","+g.phone+","+g.status+"\n";}}
-  if(mod==="dispatches"||mod==="all"){csv+="\nDISPATCHES\nRef,Date,Guard,Branch,Units,Issued By\n";for(var i=0;i<DB.dispatches.length;i++){var d=DB.dispatches[i];var u=0;for(var j=0;j<d.items.length;j++)u+=d.items[j].qty;csv+=d.ref+","+d.date+","+(gG(d.gid).name||"?")+","+d.branch+","+u+","+d.by+"\n";}}
-  if(mod==="returns"||mod==="all"){csv+="\nRETURNS\nRef,Date,Guard,Branch,Condition,Notes\n";for(var i=0;i<DB.returns.length;i++){var r=DB.returns[i];csv+=r.ref+","+r.date+","+(gG(r.gid).name||"?")+","+r.branch+","+r.cond+","+(r.notes||"")+"\n";}}
-  if(mod==="audit"){csv="AUDIT LOG\nTime,User,Type,Message\n";for(var i=0;i<DB.audit.length;i++){var a=DB.audit[i];csv+=a.time+","+a.user+","+a.type+',"'+a.msg+'"\n';}fn="winstar-audit.csv";}
+  if(mod==="inventory"||mod==="all"){
+    csv+="INVENTORY
+Item,Category,Size,Branch,Total,Dispatched,Returned,Available,Unit Price
+";
+    for(var i=0;i<DB.items.length;i++){var it=DB.items[i];csv+=it.name+","+it.cat+","+it.size+","+it.branch+","+it.total+","+it.disp+","+it.ret+","+av(it)+","+(it.price||0)+"
+";}
+    fn="winstar-inventory.csv";
+  }
+  if(mod==="guards"||mod==="all"){
+    csv+="
+GUARD PROFILES
+Guard ID,Name,Branch,Site,Position,Phone,Status,Joined
+";
+    for(var i=0;i<DB.guards.length;i++){var g=DB.guards[i];csv+=g.gid+","+g.name+","+g.branch+","+g.site+","+g.pos+","+(g.phone||"")+","+g.status+","+g.joined+"
+";}
+  }
+  if(mod==="dispatches"||mod==="all"){
+    csv+="
+DISPATCHES
+Ref,Date,Guard,Guard ID,Branch,Items,Units,Issued By,Notes
+";
+    for(var i=0;i<DB.dispatches.length;i++){
+      var d=DB.dispatches[i];var g=gG(d.gid);
+      var u=0;for(var j=0;j<d.items.length;j++)u+=d.items[j].qty;
+      var iNames=d.items.map(function(x){var it=gI(x.iid);return it.name+' x'+x.qty;}).join('; ');
+      csv+=d.ref+","+d.date+","+(g.name||"?")+","+(g.gid||"")+","+d.branch+",""+iNames+"","+u+","+d.by+","+(d.notes||"")+"
+";
+    }
+  }
+  if(mod==="returns"||mod==="all"){
+    csv+="
+RETURNS
+Ref,Date,Guard,Branch,Dispatch Ref,Condition,Notes
+";
+    for(var i=0;i<DB.returns.length;i++){var r=DB.returns[i];csv+=r.ref+","+r.date+","+(gG(r.gid).name||"?")+","+r.branch+","+r.dref+","+r.cond+","+(r.notes||"")+"
+";}
+  }
+  if(mod==="audit"){
+    csv="AUDIT LOG
+Time,User,Type,Message
+";
+    for(var i=0;i<DB.audit.length;i++){var a=DB.audit[i];csv+=a.time+","+a.user+","+a.type+',"'+a.msg+'"
+';}
+    fn="winstar-audit.csv";
+  }
   var blob=new Blob([csv],{type:"text/csv"});
   var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fn;a.click();
   addAudit(CU?CU.username:"?",mod+" exported","export");
-  toast("Exported: "+fn,"tb");
-}
+  toast("Exported: "+fn,"tb");}
 
+// ══════════════════════════════════════════
+// MISC UTILS
+// ══════════════════════════════════════════
 function doBackup(){addAudit(CU?CU.username:"?","Manual backup initiated","export");toast("Backup complete","tb");}
 
+function copyRLSSQL(){
+  var sql="-- Run in Supabase SQL Editor\n-- Replaces allow-all with read/write split\ndrop policy if exists \"allow all\" on ws_users;\ncreate policy \"read\" on ws_users for select using (true);\ncreate policy \"write\" on ws_users for all using (true) with check (true);\n-- Repeat for all tables: ws_guards, ws_items, ws_dispatches, ws_returns, ws_requests, ws_branches, ws_audit";
+  if(navigator.clipboard) navigator.clipboard.writeText(sql).then(function(){toast("RLS SQL copied!","tb");});
+  else toast("Copy from Settings > Security section","tb");}
 
-// ── AUTO REFRESH FROM CLOUD ──
-setInterval(function(){
-  if(USE_CLOUD && CU && document.getElementById("app").classList.contains("on")){
-    loadFromCloud().then(function(){
-      // silently refresh current page
-      var active=document.querySelector(".pag[style*='block']");
-      if(active){
-        var pid=active.id.replace("p-","");
-        var fns={dashboard:rDash,inventory:rInv,guards:rGuards,
-                 dispatches:rDisp,returns:rRet,requests:rReqs,
-                 reports:rReports,audit:rAudit,alerts:rAlerts,
-                 branches:rBranches,users:rUsers};
-        if(fns[pid]) fns[pid]();
-      }
-    }).catch(function(){});
-  }
-}, 30000); // every 30 seconds
+function toggleTheme(){
+  document.body.classList.toggle('light');
+  var btn=document.getElementById('theme-btn');
+  var isLight=document.body.classList.contains('light');
+  if(btn){btn.textContent=isLight?'☽':'☀';btn.title=isLight?'Dark mode':'Light mode';}
+  localStorage.setItem('winstar_theme',isLight?'light':'dark');}
 
-document.addEventListener("keydown",function(e){if(e.key==="Escape")closeM();});
 function manualSync(){
   if(!USE_CLOUD||!CU){toast("Not connected to cloud","tr");return;}
   var dot=document.getElementById("sync-dot");
@@ -1960,80 +2273,53 @@ function manualSync(){
   loadFromCloud().then(function(){
     if(dot) dot.style.background="var(--green)";
     if(lbl) lbl.textContent="Synced";
-    // refresh current page
     var active=document.querySelector(".pag[style*='block']");
-    if(active){
-      var pid=active.id.replace("p-","");
-      var fns={dashboard:rDash,inventory:rInv,guards:rGuards,dispatches:rDisp,returns:rRet,requests:rReqs,reports:rReports,audit:rAudit,alerts:rAlerts,branches:rBranches,users:rUsers};
-      if(fns[pid]) fns[pid]();
-    }
-    toast("\u2713 Data synced from cloud","tb");
+    if(active){var pid=active.id.replace("p-","");var fns={dashboard:rDash,inventory:rInv,guards:rGuards,dispatches:rDisp,returns:rRet,requests:rReqs,reports:rReports,audit:rAudit,alerts:rAlerts,branches:rBranches,users:rUsers};if(fns[pid])fns[pid]();}
+    toast("✓ Synced from cloud","tb");
     setTimeout(function(){if(lbl)lbl.textContent="Active";},3000);
-  }).catch(function(e){
+  }).catch(function(){
     if(dot) dot.style.background="var(--red)";
     if(lbl) lbl.textContent="Sync failed";
-    toast("Sync failed - check connection","tr");
+    toast("Sync failed","tr");
     setTimeout(function(){if(dot)dot.style.background="var(--green)";if(lbl)lbl.textContent="Active";},4000);
-  });
-}
+  });}
 
-function toggleTheme(){
-  document.body.classList.toggle('light');
-  var btn=document.getElementById('theme-btn');
-  var isLight=document.body.classList.contains('light');
-  btn.textContent=isLight?'\u263D':'\u2600';
-  btn.title=isLight?'Switch to dark mode':'Switch to light mode';
-  localStorage.setItem('winstar_theme',isLight?'light':'dark');
-}
-// Apply saved theme
-(function(){if(localStorage.getItem('winstar_theme')==='light'){document.body.classList.add('light');var btn=document.getElementById('theme-btn');if(btn){btn.textContent='\u263D';btn.title='Switch to dark mode';}}})();
+// ── AUTO REFRESH ──
+setInterval(function(){
+  if(USE_CLOUD&&CU&&document.getElementById("app").classList.contains("on")){
+    loadFromCloud().then(function(){
+      var active=document.querySelector(".pag[style*='block']");
+      if(active){var pid=active.id.replace("p-","");var fns={dashboard:rDash,inventory:rInv,guards:rGuards,dispatches:rDisp,returns:rRet,requests:rReqs};if(fns[pid])fns[pid]();}
+    }).catch(function(){});
+  }
+},30000);
 
-// Update session indicator every minute
+// ── SESSION COUNTDOWN ──
 setInterval(function(){
   if(!CU) return;
-  var idleMins = Math.floor((Date.now() - lastActivity) / 60000);
-  var remaining = SESSION_TIMEOUT_MINS - idleMins;
-  var lbl = document.getElementById('session-label');
-  var dot = lbl ? lbl.previousElementSibling : null;
-  if(lbl){
-    if(remaining <= 5){
-      lbl.textContent = 'Timeout in ' + remaining + 'min';
-      if(dot) dot.style.background = 'var(--red)';
-    } else {
-      lbl.textContent = 'Active';
-      if(dot) dot.style.background = 'var(--green)';
-    }
-  }
-}, 30000);
+  var idleMins=Math.floor((Date.now()-lastActivity)/60000);
+  var remaining=SESSION_TIMEOUT_MINS-idleMins;
+  var lbl=document.getElementById('session-label');
+  var dot=lbl?lbl.previousElementSibling:null;
+  if(lbl){if(remaining<=5){lbl.textContent='Timeout in '+remaining+'min';if(dot)dot.style.background='var(--red)';}else{lbl.textContent='Active';if(dot)dot.style.background='var(--green)';}}
+},30000);
 
-// Show security status on load
-showSecurityStatus();
+// ── APPLY SAVED THEME ──
+(function(){if(localStorage.getItem('winstar_theme')==='light'){document.body.classList.add('light');var btn=document.getElementById('theme-btn');if(btn){btn.textContent='☽';btn.title='Dark mode';}}})();
 
-// ── PAGE LOAD: check cloud config ──
+// ── PAGE LOAD ──
 (function(){
-  var savedUrl = localStorage.getItem('winstar_sb_url');
-  var savedKey = localStorage.getItem('winstar_sb_key');
-  if (savedUrl && savedKey) {
-    // Already configured - load from cloud then show login
-    SB_URL = savedUrl; SB_KEY = savedKey; USE_CLOUD = true;
+  var savedUrl=localStorage.getItem('winstar_sb_url');
+  var savedKey=localStorage.getItem('winstar_sb_key');
+  if(savedUrl&&savedKey){
+    SB_URL=savedUrl;SB_KEY=savedKey;USE_CLOUD=true;
     loadFromCloud().then(function(ok){
-      if (ok) { showLogin(); } 
-      else { 
-        // Cloud failed, use localStorage
-        USE_CLOUD = false;
-        showLogin();
-        toast('Cloud offline - using local data','tr');
-      }
+      if(ok){showLogin();}
+      else{USE_CLOUD=false;showLogin();toast('Cloud offline - using local data','tr');}
     });
-  } else if (localStorage.getItem('winstar_local_only') === '1') {
-    // User chose local only before
+  } else if(localStorage.getItem('winstar_local_only')==='1'){
     showLogin();
   } else {
-    // First time - show setup
     showSetup();
   }
 })();
-
-</script>
-</body>
-</html>
