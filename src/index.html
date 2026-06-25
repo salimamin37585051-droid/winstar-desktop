@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Winstar | winstar.co.ke</title>
+<title>Winstar | WINSTAR</title>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -376,6 +377,7 @@ body.light .fi option,body.light .fi2 option,body.light .bsel option{background:
               <button onclick="toggleSql()" id="sql-tog" style="font-size:11px;padding:5px 12px;border-radius:6px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.15);color:var(--fg3);cursor:pointer">&#9660; Show SQL</button>
             </div>
             <div class="sql-box" id="sql-box">
+-- WINSTAR SECURE SETUP (fresh install)
 create table ws_users(id serial primary key,username text unique,password text,name text,role text,branch text,initials text,last_login text,active boolean default true);
 create table ws_guards(id serial primary key,gid text,name text,branch text,site text,pos text,phone text,status text,joined text);
 create table ws_items(id serial primary key,name text,cat text,size text,branch text,total int default 0,disp int default 0,ret int default 0,price numeric default 0);
@@ -384,6 +386,7 @@ create table ws_returns(id serial primary key,ref text,gid int,date text,branch 
 create table ws_requests(id serial primary key,ref text,gid int,date text,item text,reason text,priority text,status text default 'pending');
 create table ws_branches(id serial primary key,name text,loc text,mgr text,status text default 'active');
 create table ws_audit(id serial primary key,ts text,user_name text,msg text,type text);
+
 alter table ws_users enable row level security;
 alter table ws_guards enable row level security;
 alter table ws_items enable row level security;
@@ -392,14 +395,43 @@ alter table ws_returns enable row level security;
 alter table ws_requests enable row level security;
 alter table ws_branches enable row level security;
 alter table ws_audit enable row level security;
-create policy "allow all" on ws_users for all using (true) with check (true);
-create policy "allow all" on ws_guards for all using (true) with check (true);
-create policy "allow all" on ws_items for all using (true) with check (true);
-create policy "allow all" on ws_dispatches for all using (true) with check (true);
-create policy "allow all" on ws_returns for all using (true) with check (true);
-create policy "allow all" on ws_requests for all using (true) with check (true);
-create policy "allow all" on ws_branches for all using (true) with check (true);
-create policy "allow all" on ws_audit for all using (true) with check (true);
+
+-- Read: anon key can SELECT (app needs this to load data after login)
+create policy "ws_read" on ws_users for select using (true);
+create policy "ws_read" on ws_guards for select using (true);
+create policy "ws_read" on ws_items for select using (true);
+create policy "ws_read" on ws_dispatches for select using (true);
+create policy "ws_read" on ws_returns for select using (true);
+create policy "ws_read" on ws_requests for select using (true);
+create policy "ws_read" on ws_branches for select using (true);
+create policy "ws_read" on ws_audit for select using (true);
+
+-- Write: anon key can INSERT/UPDATE (app needs this to save records)
+create policy "ws_insert" on ws_users for insert with check (true);
+create policy "ws_insert" on ws_guards for insert with check (true);
+create policy "ws_insert" on ws_items for insert with check (true);
+create policy "ws_insert" on ws_dispatches for insert with check (true);
+create policy "ws_insert" on ws_returns for insert with check (true);
+create policy "ws_insert" on ws_requests for insert with check (true);
+create policy "ws_insert" on ws_branches for insert with check (true);
+create policy "ws_insert" on ws_audit for insert with check (true);
+
+create policy "ws_update" on ws_users for update using (true) with check (true);
+create policy "ws_update" on ws_guards for update using (true) with check (true);
+create policy "ws_update" on ws_items for update using (true) with check (true);
+create policy "ws_update" on ws_requests for update using (true) with check (true);
+create policy "ws_update" on ws_branches for update using (true) with check (true);
+
+-- Delete: restricted to specific tables only (matches app's delete features)
+create policy "ws_delete" on ws_users for delete using (true);
+create policy "ws_delete" on ws_guards for delete using (true);
+create policy "ws_delete" on ws_items for delete using (true);
+create policy "ws_delete" on ws_dispatches for delete using (true);
+create policy "ws_delete" on ws_returns for delete using (true);
+create policy "ws_delete" on ws_requests for delete using (true);
+create policy "ws_delete" on ws_branches for delete using (true);
+
+-- NOTE: dispatches/returns/audit have no update policy (immutable records by design)
             </div>
           </div>
         </div>
@@ -520,7 +552,7 @@ create policy "allow all" on ws_audit for all using (true) with check (true);
       <div id="p-inventory" class="pag">
         <div class="pgh"><div class="pgt">Inventory</div><div class="pgs">Manage uniform stock across all branches</div></div>
         <div class="card">
-          <div class="ch"><div class="ct">&#9638; Stock Records</div><div class="ca"><button class="tbb tbb-g" onclick="doExport('inventory')">&#8595; Excel</button><button class="tbb tbb-p" onclick="openM('add-item',0)">+ Add Item</button></div></div>
+          <div class="ch"><div class="ct">&#9638; Stock Records</div><div class="ca"><button class="tbb tbb-g" onclick="dlTemplate('inventory')">&#128196; Template</button><button class="tbb tbb-g" onclick="doExport('inventory')">&#8595; Export</button><button class="tbb tbb-g" onclick="importExcel('inventory')">&#8593; Import Excel</button><button class="tbb tbb-p" onclick="openM('add-item',0)">+ Add Item</button></div></div>
           <div class="filt">
             <input class="fi2" id="isrch" placeholder="Search items..." oninput="rInv()">
             <select class="fi2" id="icat" onchange="rInv()"><option value="">All Categories</option></select>
@@ -533,8 +565,12 @@ create policy "allow all" on ws_audit for all using (true) with check (true);
       <!-- GUARDS -->
       <div id="p-guards" class="pag">
         <div class="pgh"><div class="pgt">Guard Profiles</div><div class="pgs">Employee records linked to uniform history</div></div>
+        <div class="card" id="unif-summary-card" style="display:none">
+          <div class="ch"><div class="ct">&#9638; Uniform Breakdown by Type</div><button class="ab abv" onclick="rUnifSummary()">&#8635; Refresh</button></div>
+          <div id="unif-summary" style="padding:0"></div>
+        </div>
         <div class="card">
-          <div class="ch"><div class="ct">&#9675; Guard Registry</div><div class="ca"><button class="tbb tbb-g" onclick="doExport('guards')">&#8595; Excel</button><button class="tbb tbb-p" onclick="openM('add-guard',0)">+ Add Guard</button></div></div>
+          <div class="ch"><div class="ct">&#9675; Guard Registry</div><div class="ca"><button class="tbb tbb-g" onclick="dlTemplate('guards')">&#128196; Template</button><button class="tbb tbb-g" onclick="doExport('guards')">&#8595; Export</button><button class="tbb tbb-g" onclick="importExcel('guards')">&#8593; Import Excel</button><button class="tbb tbb-p" onclick="openM('add-guard',0)">+ Add Guard</button></div></div>
           <div class="filt">
             <input class="fi2" id="gsrch" placeholder="Search guards..." oninput="rGuards()">
             <select class="fi2" id="gbr" onchange="rGuards()"><option value="">All Branches</option><option>HQ - Nairobi</option><option>Mombasa</option><option>Kisumu</option><option>Nakuru</option></select>
@@ -657,6 +693,7 @@ create policy "allow all" on ws_audit for all using (true) with check (true);
 <!-- MODAL -->
 <div id="mbg" onclick="if(event.target===this)closeM()"><div class="modal" id="mi"></div></div>
 <div id="toast"></div>
+<input type="file" id="xl-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleXlFile(event)">
 <script>
 /* ============================================================
    WINSTAR UNIFORM MANAGEMENT SYSTEM v2.0
@@ -858,7 +895,7 @@ function stopSession(){ if(sessionTimer){ clearInterval(sessionTimer); sessionTi
 
 /* ── NAVIGATION ── */
 var PGTITLES={dashboard:"Dashboard",inventory:"Inventory",guards:"Guard Profiles",dispatches:"Dispatches",returns:"Returns",requests:"Replacement Requests",reports:"Reports & Analytics",audit:"Audit Logs",alerts:"Alerts",branches:"Branch Management",users:"User Management",settings:"Settings"};
-var PGRENDER={dashboard:rDash,inventory:rInv,guards:rGuards,dispatches:rDisp,returns:rRet,requests:rReqs,reports:rReports,audit:rAudit,alerts:rAlerts,branches:rBranches,users:rUsers};
+var PGRENDER={dashboard:rDash,inventory:rInv,guards:function(){rGuards();rUnifSummary();},_rGuards:rGuards,dispatches:rDisp,returns:rRet,requests:rReqs,reports:rReports,audit:rAudit,alerts:rAlerts,branches:rBranches,users:rUsers};
 
 function navTo(p){
   document.querySelectorAll(".ni").forEach(function(n){ n.classList.remove("act"); });
@@ -1585,6 +1622,347 @@ function printDisp(id){
     '<div style="text-align:center;padding:20px"><button onclick="window.print()" style="padding:10px 24px;background:#C9A84C;color:#000;border:none;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;margin-right:10px">&#128424; Print / Save PDF</button><button onclick="window.close()" style="padding:10px 24px;background:#eee;color:#333;border:none;border-radius:6px;font-size:14px;cursor:pointer">Close</button></div></body></html>');
   win.document.close();
 }
+
+
+/* ══════════════════════════════════════════════════════
+   EXCEL IMPORT / EXPORT TEMPLATES
+   ══════════════════════════════════════════════════════ */
+
+var xlImportType = "";
+
+/* Download blank template */
+function dlTemplate(type) {
+  if (typeof XLSX === "undefined") { toast("Excel library loading, try again in 2 seconds", "tr"); return; }
+  var wb = XLSX.utils.book_new();
+  var ws;
+  if (type === "inventory") {
+    ws = XLSX.utils.aoa_to_sheet([
+      ["Item Name","Category","Size","Branch","Total Qty","Unit Price (KES)"],
+      ["Guard Shirt","Top","L","HQ - Nairobi",50,850],
+      ["Guard Trousers","Bottom","32","HQ - Nairobi",50,1200],
+      ["Guard Shoes","Footwear","42","HQ - Nairobi",30,2500],
+      ["Guard Cap","Headwear","One Size","HQ - Nairobi",60,450],
+      ["Safety Vest","Safety","L","Mombasa",40,750],
+      ["Guard Belt","Accessory","One Size","Mombasa",60,350],
+      ["Jacket","Outerwear","M","Kisumu",25,3200],
+      ["Overalls","Coverall","XL","Nakuru",20,2800]
+    ]);
+    /* Set column widths */
+    ws['!cols'] = [{wch:22},{wch:14},{wch:10},{wch:16},{wch:12},{wch:18}];
+    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+    /* Add instructions sheet */
+    var inst = XLSX.utils.aoa_to_sheet([
+      ["WINSTAR INVENTORY IMPORT TEMPLATE"],
+      [""],
+      ["INSTRUCTIONS:"],
+      ["1. Fill in the Inventory sheet with your uniform items"],
+      ["2. Item Name — required (e.g. Guard Shirt, Safety Boots)"],
+      ["3. Category — must be one of: Top, Bottom, Footwear, Headwear, Safety, Coverall, Outerwear, Accessory"],
+      ["4. Size — e.g. S, M, L, XL, 42, One Size"],
+      ["5. Branch — must be one of: HQ - Nairobi, Mombasa, Kisumu, Nakuru"],
+      ["6. Total Qty — number only (how many units you have in stock)"],
+      ["7. Unit Price (KES) — number only, can be 0 if unknown"],
+      [""],
+      ["CATEGORIES QUICK REFERENCE:"],
+      ["Top       — Shirts, T-shirts, Polo shirts, blouses"],
+      ["Bottom    — Trousers, shorts, skirts"],
+      ["Footwear  — Shoes, boots, sandals"],
+      ["Headwear  — Caps, helmets, hats, berets"],
+      ["Safety    — Vests, gloves, goggles, hard hats"],
+      ["Coverall  — Overalls, boiler suits, uniforms"],
+      ["Outerwear — Jackets, coats, blazers"],
+      ["Accessory — Belts, ties, ID holders, lanyards"]
+    ]);
+    XLSX.utils.book_append_sheet(wb, inst, "Instructions");
+    XLSX.writeFile(wb, "winstar-inventory-template.xlsx");
+  } else if (type === "guards") {
+    ws = XLSX.utils.aoa_to_sheet([
+      ["Guard ID","Full Name","Branch","Site / Post","Position","Phone","Join Date (YYYY-MM-DD)","Status"],
+      ["WS-001","John Mwangi","HQ - Nairobi","CBD Tower","Senior Guard","+254 712 345 678","2024-01-15","active"],
+      ["WS-002","Mary Akinyi","Mombasa","Port Entry","Guard","+254 722 456 789","2024-02-20","active"],
+      ["WS-003","David Otieno","Kisumu","Mega Plaza","Supervisor","+254 733 567 890","2023-11-10","active"]
+    ]);
+    ws['!cols'] = [{wch:12},{wch:22},{wch:16},{wch:16},{wch:16},{wch:18},{wch:22},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, ws, "Guards");
+    var inst2 = XLSX.utils.aoa_to_sheet([
+      ["WINSTAR GUARDS IMPORT TEMPLATE"],
+      [""],
+      ["INSTRUCTIONS:"],
+      ["1. Fill in the Guards sheet with your guard records"],
+      ["2. Guard ID — unique ID for each guard (e.g. WS-001, G-0042)"],
+      ["3. Full Name — first and last name"],
+      ["4. Branch — must be one of: HQ - Nairobi, Mombasa, Kisumu, Nakuru"],
+      ["5. Site / Post — where the guard is deployed (e.g. CBD Tower, Airport Gate 3)"],
+      ["6. Position — job title (e.g. Guard, Senior Guard, Supervisor)"],
+      ["7. Phone — include country code (e.g. +254 712 345 678)"],
+      ["8. Join Date — in YYYY-MM-DD format (e.g. 2024-01-15)"],
+      ["9. Status — must be: active or inactive"]
+    ]);
+    XLSX.utils.book_append_sheet(wb, inst2, "Instructions");
+    XLSX.writeFile(wb, "winstar-guards-template.xlsx");
+  }
+  toast("Template downloaded \u2713", "tg");
+  addAudit(CU ? CU.username : "?", type + " template downloaded", "export");
+}
+
+/* Trigger file picker */
+function importExcel(type) {
+  if (typeof XLSX === "undefined") { toast("Excel library loading, please wait...", "tr"); return; }
+  xlImportType = type;
+  var inp = document.getElementById("xl-input");
+  inp.value = "";
+  inp.click();
+}
+
+/* Handle file selection */
+function handleXlFile(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = new Uint8Array(e.target.result);
+      var wb = XLSX.read(data, { type: "array" });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      showImportPreview(xlImportType, rows);
+    } catch(err) {
+      toast("Could not read file: " + err.message, "tr");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/* Show preview modal before importing */
+function showImportPreview(type, rows) {
+  if (!rows || rows.length < 2) { toast("File is empty or has no data rows", "tr"); return; }
+  var header = rows[0];
+  var dataRows = rows.slice(1).filter(function(r) { return r.some(function(c) { return String(c).trim() !== ""; }); });
+  if (dataRows.length === 0) { toast("No data rows found in file", "tr"); return; }
+
+  var m = document.getElementById("mi");
+  document.getElementById("mbg").classList.add("on");
+  m.className = "modal modal-lg";
+
+  var thHtml = header.map(function(h) { return "<th>" + h + "</th>"; }).join("");
+  var trHtml = dataRows.slice(0, 10).map(function(r) {
+    return "<tr>" + header.map(function(_, i) { return "<td style='font-size:11px'>" + (r[i] || "") + "</td>"; }).join("") + "</tr>";
+  }).join("");
+
+  var more = dataRows.length > 10 ? '<div style="font-size:12px;color:var(--fg3);padding:8px 0">&hellip; and ' + (dataRows.length - 10) + ' more rows</div>' : "";
+
+  m.innerHTML =
+    '<div class="mt">&#8593; Import ' + (type === "inventory" ? "Inventory" : "Guards") + ' from Excel</div>' +
+    '<div style="font-size:13px;color:var(--fg2);margin-bottom:12px">Found <strong style="color:var(--g)">' + dataRows.length + ' rows</strong> in your file. Preview (first 10 rows):</div>' +
+    '<div style="max-height:260px;overflow:auto;border:1px solid rgba(201,168,76,0.15);border-radius:8px"><table><thead><tr>' + thHtml + '</tr></thead><tbody>' + trHtml + '</tbody></table></div>' +
+    more +
+    '<div id="import-err" class="ebox on" style="display:none;margin-top:10px"></div>' +
+    '<div class="ma">' +
+      '<button class="btn-c" onclick="closeM()">Cancel</button>' +
+      '<button class="btn-s" onclick="confirmImport(\'' + type + '\')" id="import-confirm-btn">&#8593; Import ' + dataRows.length + ' Records</button>' +
+    '</div>';
+
+  /* Store rows for confirm step */
+  window._importRows = dataRows;
+  window._importHeader = header;
+}
+
+/* Actually do the import */
+function confirmImport(type) {
+  var rows = window._importRows;
+  var header = window._importHeader;
+  if (!rows || !header) return;
+
+  var btn = document.getElementById("import-confirm-btn");
+  var errEl = document.getElementById("import-err");
+  btn.textContent = "Importing..."; btn.disabled = true;
+
+  var added = 0, skipped = 0, errors = [];
+
+  /* Normalize header to lowercase for matching */
+  var hMap = {};
+  header.forEach(function(h, i) { hMap[String(h).toLowerCase().trim()] = i; });
+
+  function col(r, names) {
+    for (var i = 0; i < names.length; i++) {
+      var idx = hMap[names[i]];
+      if (idx !== undefined && r[idx] !== undefined && String(r[idx]).trim() !== "") return String(r[idx]).trim();
+    }
+    return "";
+  }
+
+  var VALID_CATS = ["Top","Bottom","Footwear","Headwear","Safety","Coverall","Outerwear","Accessory"];
+  var VALID_BRS  = ["HQ - Nairobi","Mombasa","Kisumu","Nakuru"];
+
+  if (type === "inventory") {
+    rows.forEach(function(r, ri) {
+      var name = col(r, ["item name","name","item"]);
+      var cat  = col(r, ["category","cat","type"]);
+      var size = col(r, ["size"]) || "One Size";
+      var br   = col(r, ["branch","location"]) || "HQ - Nairobi";
+      var qty  = parseInt(col(r, ["total qty","total","quantity","qty"])) || 0;
+      var price = parseFloat(col(r, ["unit price (kes)","unit price","price","kes"])) || 0;
+
+      if (!name) { skipped++; return; }
+      /* Auto-map category if not standard */
+      if (VALID_CATS.indexOf(cat) < 0) {
+        var lcCat = cat.toLowerCase();
+        if (lcCat.indexOf("shirt")||lcCat.indexOf("top")||lcCat.indexOf("polo")) cat = "Top";
+        else if (lcCat.indexOf("trouser")||lcCat.indexOf("pant")||lcCat.indexOf("short")) cat = "Bottom";
+        else if (lcCat.indexOf("shoe")||lcCat.indexOf("boot")||lcCat.indexOf("foot")) cat = "Footwear";
+        else if (lcCat.indexOf("cap")||lcCat.indexOf("hat")||lcCat.indexOf("helmet")) cat = "Headwear";
+        else if (lcCat.indexOf("vest")||lcCat.indexOf("safety")) cat = "Safety";
+        else if (lcCat.indexOf("overall")||lcCat.indexOf("coverall")||lcCat.indexOf("suit")) cat = "Coverall";
+        else if (lcCat.indexOf("jacket")||lcCat.indexOf("coat")) cat = "Outerwear";
+        else cat = "Accessory";
+      }
+      if (VALID_BRS.indexOf(br) < 0) br = "HQ - Nairobi";
+      /* Check for duplicate name+size+branch */
+      var dup = false;
+      for (var i = 0; i < DB.items.length; i++) {
+        if (DB.items[i].name.toLowerCase() === name.toLowerCase() && DB.items[i].size === size && DB.items[i].branch === br) { dup = true; break; }
+      }
+      if (dup) { skipped++; return; }
+      var ni = {id: nid(DB.items), name: name, cat: cat, size: size, branch: br, total: qty, disp: 0, ret: 0, price: price};
+      DB.items.push(ni);
+      cloudSaveItem(ni);
+      added++;
+    });
+  } else if (type === "guards") {
+    rows.forEach(function(r, ri) {
+      var gid  = col(r, ["guard id","id","guard_id"]);
+      var name = col(r, ["full name","name","guard name"]);
+      var br   = col(r, ["branch","location"]) || "HQ - Nairobi";
+      var site = col(r, ["site / post","site","post","location"]) || "";
+      var pos  = col(r, ["position","role","title","rank"]) || "Guard";
+      var phone = col(r, ["phone","telephone","mobile","+254"]) || "";
+      var joined = col(r, ["join date (yyyy-mm-dd)","join date","joined","start date"]) || new Date().toISOString().slice(0,10);
+      var status = (col(r, ["status"]) || "active").toLowerCase();
+
+      if (!name || !gid) { skipped++; return; }
+      /* Check duplicate GID */
+      var dup = false;
+      for (var i = 0; i < DB.guards.length; i++) {
+        if (DB.guards[i].gid.toLowerCase() === gid.toLowerCase()) { dup = true; break; }
+      }
+      if (dup) { skipped++; return; }
+      if (VALID_BRS.indexOf(br) < 0) br = "HQ - Nairobi";
+      if (["active","inactive"].indexOf(status) < 0) status = "active";
+      var ng = {id: nid(DB.guards), gid: gid, name: name, branch: br, site: site, pos: pos, phone: phone, status: status, joined: joined};
+      DB.guards.push(ng);
+      cloudSaveGuard(ng);
+      added++;
+    });
+  }
+
+  saveDB();
+  addAudit(CU ? CU.username : "?", "Imported " + added + " " + type + " records (" + skipped + " skipped)", "create");
+
+  var summary = "\u2713 Import complete: " + added + " added, " + skipped + " skipped (duplicates or missing name).";
+  if (type === "inventory") { rInv(); updBadges(); chkLow(); }
+  else { rGuards(); rUnifSummary(); }
+
+  btn.textContent = "\u2713 Done"; btn.disabled = false;
+  m.innerHTML =
+    '<div class="mt">&#10003; Import Complete</div>' +
+    '<div class="abar abar-g">&#10003; <strong>' + added + ' records imported</strong> successfully' + (skipped > 0 ? ' &mdash; ' + skipped + ' rows skipped (duplicates or missing name)' : '') + '</div>' +
+    (skipped > 0 ? '<div style="font-size:12px;color:var(--fg3);margin-top:8px">Rows are skipped if: the name/ID is blank, or a record with the same name+size+branch (inventory) or Guard ID (guards) already exists.</div>' : '') +
+    '<div class="ma"><button class="btn-s" onclick="closeM()">Done</button></div>';
+  toast("\u2713 Imported " + added + " " + type, "tg");
+}
+
+/* ══════════════════════════════════════════════════════
+   UNIFORM BREAKDOWN BY TYPE (per guard)
+   ══════════════════════════════════════════════════════ */
+
+function rUnifSummary() {
+  var card = document.getElementById("unif-summary-card");
+  var container = document.getElementById("unif-summary");
+  if (!card || !container) return;
+
+  if (DB.guards.length === 0 || DB.dispatches.length === 0) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "block";
+
+  /* Get all unique categories that have been dispatched */
+  var cats = [];
+  DB.items.forEach(function(it) { if (cats.indexOf(it.cat) < 0) cats.push(it.cat); });
+  cats.sort();
+
+  /* For each guard, calculate held items per category */
+  var rows = [];
+  DB.guards.forEach(function(g) {
+    if (g.status !== "active") return;
+    var held = {};
+    cats.forEach(function(c) { held[c] = 0; });
+    /* Add dispatched */
+    DB.dispatches.forEach(function(d) {
+      if (d.gid !== g.id) return;
+      d.items.forEach(function(x) {
+        var it = gI(x.iid);
+        if (it && it.cat) held[it.cat] = (held[it.cat] || 0) + x.qty;
+      });
+    });
+    /* Subtract returned */
+    DB.returns.forEach(function(r) {
+      if (r.gid !== g.id) return;
+      r.items.forEach(function(x) {
+        var it = gI(x.iid);
+        if (it && it.cat) held[it.cat] = Math.max(0, (held[it.cat] || 0) - x.qty);
+      });
+    });
+    var total = 0;
+    cats.forEach(function(c) { total += held[c] || 0; });
+    if (total > 0) rows.push({ g: g, held: held, total: total });
+  });
+
+  if (rows.length === 0) {
+    container.innerHTML = '<div class="es"><div class="es-t">No uniforms currently issued</div></div>';
+    return;
+  }
+
+  /* Build table */
+  var thCats = cats.map(function(c) { return '<th style="text-align:center">' + c + '</th>'; }).join("");
+  var tbRows = rows.map(function(row) {
+    var tds = cats.map(function(c) {
+      var v = row.held[c] || 0;
+      return '<td style="text-align:center">' + (v > 0 ? '<strong style="color:var(--g)">' + v + '</strong>' : '<span style="color:var(--fg3)">—</span>') + '</td>';
+    }).join("");
+    return '<tr>' +
+      '<td class="tm">' + row.g.gid + '</td>' +
+      '<td class="tb">' + row.g.name + '</td>' +
+      '<td>' + row.g.branch + '</td>' +
+      tds +
+      '<td style="text-align:center;font-weight:800;color:var(--g)">' + row.total + '</td>' +
+    '</tr>';
+  }).join("");
+
+  /* Totals row */
+  var totals = {};
+  cats.forEach(function(c) { totals[c] = 0; });
+  rows.forEach(function(row) { cats.forEach(function(c) { totals[c] += row.held[c] || 0; }); });
+  var totalAll = rows.reduce(function(s, r) { return s + r.total; }, 0);
+  var totRow = '<tr style="background:rgba(201,168,76,0.06);font-weight:700">' +
+    '<td colspan="3" style="color:var(--fg3);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px">TOTALS (active guards)</td>' +
+    cats.map(function(c) { return '<td style="text-align:center;color:var(--g)">' + (totals[c] || 0) + '</td>'; }).join("") +
+    '<td style="text-align:center;color:var(--g)">' + totalAll + '</td>' +
+  '</tr>';
+
+  container.innerHTML =
+    '<div style="overflow-x:auto">' +
+    '<table><thead><tr>' +
+      '<th>ID</th><th>Guard Name</th><th>Branch</th>' +
+      thCats +
+      '<th style="text-align:center">Total</th>' +
+    '</tr></thead><tbody>' +
+      tbRows + totRow +
+    '</tbody></table>' +
+    '</div>' +
+    '<div style="padding:10px 16px;font-size:11px;color:var(--fg3)">Shows uniforms <strong>currently held</strong> by each active guard (dispatched minus returned). Columns auto-generated from your inventory categories.</div>';
+}
+
 
 /* ── EXPORT ── */
 function doExport(mod){
